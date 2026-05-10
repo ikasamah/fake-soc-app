@@ -1,0 +1,9 @@
+# Built artifacts
+/fake-soc-app
+/fake-soc.app/
+/fake-soc.app.zip
+
+# Editor / OS
+.DS_Store
+*.swp
+*~
