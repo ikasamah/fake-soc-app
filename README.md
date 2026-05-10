@@ -1,98 +1,143 @@
 # fake-soc-app
 
-ターミナル app から完全に独立した GUI 版。Fyne で全画面ウィンドウを開いて、独自の配色・フォント・レイアウトでダッシュボードを描画する。**ホストのターミナル設定（色テーマ・フォント・透明度など）は一切影響しない。**
+映像撮影の小道具用、macOS 単体で動く GUI フェイクダッシュボード。
+**ホストのターミナル設定（色・フォント・透明度）の影響を一切受けず**、独自の配色・フォント・レイアウトで全画面に描画する。
 
-## 配布物
-
-| ファイル | 用途 |
-|---|---|
-| `fake-soc-app` | Mach-O 64bit arm64 バイナリ。`./fake-soc-app` で起動 |
-| `fake-soc.app` | macOS アプリバンドル。Finder からダブルクリック起動 |
+ジャンル感: コンサル × 金融 SOC（監視センター）/ Bloomberg ターミナル風。
+起動 → 90 秒サイクルで `normal → degraded → incident → recovery` のドラマが流れる。
 
 ## 起動
 
-### ダブルクリック
-
+```bash
+open fake-soc.app
+# または
+./fake-soc-app
 ```
-~/Downloads/fake-soc-app/fake-soc.app
-```
 
-Finder で `fake-soc.app` をダブルクリックすれば全画面ウィンドウが開く。
+終了: `Esc` / `Q` / `Cmd-Q`
 
-初回起動で macOS の Gatekeeper に弾かれる場合は:
-1. システム設定 → プライバシーとセキュリティ → 「fake-soc を開く」を許可
-2. または右クリック → 開く
+## 配布物
 
-### コマンド経由
+ビルド成果物は git 管理外（`.gitignore`）。各自でビルドする想定:
 
 ```bash
-~/Downloads/fake-soc-app/fake-soc-app
+go build -o fake-soc-app .
+~/go/bin/fyne package -os darwin -name "fake-soc" -appID "com.fakesoc.app"
 ```
 
-## 終了
+`fyne` CLI が無い場合:
+```bash
+go install fyne.io/tools/cmd/fyne@latest
+```
 
-- `Esc` キー
-- `Q` キー
-- `Cmd-Q`
+ビルド成果物:
+- `fake-soc-app` — Mach-O arm64 single binary
+- `fake-soc.app` — macOS app bundle（ダブルクリック起動）
+
+配布する時は zip:
+```bash
+zip -r fake-soc.app.zip fake-soc.app
+```
+
+受け取った側は unzip → ダブルクリック。Gatekeeper 警告は右クリック → 開く で通る。
+
+## 動作要件
+
+- **macOS Apple Silicon**（M1 / M2 / M3 / M4）
+- macOS Big Sur (11) 以降
+- ネットワーク不要、追加 install 不要
 
 ## 機能
 
-shell 版 / bubbletea 版と同じシナリオサイクル:
+### 3 ペイン構成
 
-- normal 50s → degraded 10s → incident 20s → recovery 10s
-- 左ペイン: LLM 風 streaming（金融コンサル文脈、シナリオ別 prompts/responses）
-- 右上: 22 metric の sparkline + 中央ダイアログ + spike
-- 右下: 色つき JSON-ish ログ + ALERT bar
-
-## 配色
-
-`main.go` の冒頭に定数として定義:
-
-```go
-bgColor      = #0E0E10  // background
-fgColor      = #C8C8CA  // body text
-dimColor     = #6A6A6E  // dim text / labels
-cyanColor    = #6EA8C8  // service names
-greenColor   = #88C090  // INFO
-blueColor    = #7090C0  // DEBUG
-amberColor   = #D9A04E  // WARN
-redColor     = #D86060  // ERROR / spike metrics
-redBgColor   = #6E1618  // FATAL background / ALERT bar
+```
++-----------------------------+-----------------------------+
+|                             |  Sparkline (22 metric)      |
+|                             |  + 中央ダイアログ overlay   |
+|  LLM 風 streaming           |  + scenario 連動 spike      |
+|  (金融コンサル prompt/resp) |  + session stats block      |
+|                             +-----------------------------+
+|                             |  色つき JSON ログ feed       |
+|                             |  + ALERT bar (incident)     |
++-----------------------------+-----------------------------+
 ```
 
-色を変えたければここを編集して `go build -o fake-soc-app .`、または `~/go/bin/fyne package -os darwin -name "fake-soc" -appID "com.fakesoc.app"` で .app 再ビルド。
+### シナリオサイクル（90 秒）
 
-## フォント
+| シナリオ | 時間 | 全ペインの挙動 |
+|---|---:|---|
+| `normal` | 50s | 通常分析（revenue / AUM / NIM）/ 平和な sparkline / INFO 中心ログ |
+| `degraded` | 10s | latency 上昇調査 / spike metrics 黄色化 / WARN 増 |
+| `incident` | 20s | settlement 異常 / FX breach 分析 / spike metrics 赤で 80-100% / ERROR・FATAL・ALERT bar 流れる |
+| `recovery` | 10s | drain progress / FAILOVER COMPLETED / INFO 復帰 |
 
-現状は Fyne 内蔵の monospace（Roboto Mono 系）。撮影で別フォント（IBM Plex Mono / JetBrains Mono / Berkeley Mono など）を使いたければ:
+### 解像度逆算（auto）
 
-1. TrueType ファイルを `assets/font.ttf` に配置
-2. `//go:embed assets/font.ttf` で埋め込み
-3. theme `Font()` メソッドで `fyne.NewStaticResource("font.ttf", data)` を返す
+`--font-size` 未指定なら、起動時のキャンバスサイズから自動算出。target は左ペイン 80 cols / 右下 28 行に収まる font size。
 
-## 既知の制約
+```bash
+./fake-soc-app                    # auto（推奨）
+./fake-soc-app --font-size 24     # 手動指定
+FAKESOC_FONT_SIZE=24 ./fake-soc-app
+```
 
-- 起動直後の 1〜2 秒はサイズ計算が暫定値で、sparkline 列数が変動して見える
-- フルスクリーンは macOS の native fullscreen（別 space）。dock やメニューバーが消える
-- 文字幅・行高は近似（7.5px / 16px）で sparkline columns を計算しているので、実フォントと完全一致はしない。撮影には支障ないレベル
-- ホットリロードはなし（コード変更後は再 build）
+### 日本語対応
+
+[Cica](https://github.com/miiton/Cica)（OFL）を `//go:embed` でバイナリに埋め込み。半角:全角 = 1:2 の monospace なので英日混在でグリッド整列が崩れない。
+
+### 配色
+
+`main.go` の冒頭定数で完全制御。撮影に合わせて変えるならここを編集:
+
+```go
+bgColor    = #0E0E10  // background
+fgColor    = #C8C8CA  // body text
+dimColor   = #6A6A6E  // labels
+cyanColor  = #6EA8C8  // service names
+greenColor = #88C090  // INFO / 上昇
+amberColor = #D9A04E  // WARN
+redColor   = #D86060  // ERROR / spike / 下降
+```
+
+## カスタマイズ
+
+撮影シーンに合わせて差し替えるなら:
+
+| 変えるもの | 編集場所 |
+|---|---|
+| LLM の prompts / responses | `content.go` の `responsesNormal()` 等 |
+| Sparkline の metric 名 | `content.go` の `Metrics` |
+| Service / Event 語彙 | `content.go` の `Services` / `Events*` |
+| ダイアログ文言 | `content.go` の `Dialogs*` |
+| ALERT 文言 | `content.go` の `AlertLines` |
+| Stats 行（pnl / fx / etc.） | `main.go` の `stepStats()` / `buildStatsRows()` |
+| シナリオ持続時間 | `main.go` の `scenarioCycle` |
+
+差し替え後 `go build -o fake-soc-app . && ~/go/bin/fyne package -os darwin -name "fake-soc" -appID "com.fakesoc.app"`。
 
 ## ファイル構成
 
 ```
-~/Downloads/fake-soc-app/
-├── main.go         # Fyne app: window, theme, ticker, render
-├── content.go      # prompts / responses / metrics / log vocab
+.
+├── main.go             # window / theme / ticker / 各ペイン render
+├── content.go          # prompts / responses / metric 名 / ログ vocab
 ├── go.mod / go.sum
-├── Icon.png        # アプリアイコン (512x512)
-├── fake-soc-app    # ビルド済みバイナリ
-└── fake-soc.app    # macOS アプリバンドル
+├── Icon.png            # アプリアイコン (512x512)
+├── assets/
+│   ├── font.ttf            # Cica Regular (OFL)
+│   └── cica-LICENSE.txt    # Cica の OFL ライセンス
+└── README.md
 ```
 
-## 既存版との関係
+## ライセンス
 
-| 版 | パス | 起動方法 | 用途 |
-|---|---|---|---|
-| shell + tmux | `~/Downloads/fake-soc/` | `./start.sh` | コンテンツ即編集したい時 |
-| bubbletea ターミナル | `~/Downloads/fake-soc-go/` | `./fake-soc-go` | ターミナル内動作の Go 版 |
-| **Fyne GUI** | `~/Downloads/fake-soc-app/` | **`fake-soc.app` ダブルクリック** | **撮影本番（独立ウィンドウ、配色完全制御）** |
+- このプロジェクト本体: 私的用途（撮影プロップ）。再配布・公開はしない前提
+- 同梱の Cica フォント: SIL Open Font License 1.1 — `assets/cica-LICENSE.txt` 参照。再配布時は同梱必須
+
+## 既知の制約
+
+- arm64 専用（Intel Mac は別途 universal binary ビルドが必要）
+- Gatekeeper の「開発元未確認」警告は ad-hoc 署名のため発生 — 右クリック開くで通る。完全に黙らせるには Apple Developer 署名（年 $99）必要
+- フルスクリーンは macOS native fullscreen（別 space）— dock とメニューバーが消える
+- ホットリロードなし（コード変更後は再ビルド）
